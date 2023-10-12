@@ -1,0 +1,108 @@
+import SwiftUI
+import HealthKit
+
+class HeartRateMonitor: ObservableObject {
+    @Published var heartRate: Double? = nil
+    @Published var counter: Int = 0 // カウンターの初期値を0で設定
+    
+    private let healthStore = HKHealthStore()
+    
+    init() {
+        requestAuthorization()
+        startHeartRateUpdate()
+    }
+    
+    private func requestAuthorization() {
+        let readTypes = Set([
+            HKObjectType.quantityType(forIdentifier: .heartRate)!
+        ])
+        
+        healthStore.requestAuthorization(toShare: [], read: readTypes) { success, error in
+            if success == false {
+                print("データにアクセスできません")
+            }
+        }
+    }
+    
+    private func startHeartRateUpdate() {
+        // 最初の一回データを取得
+        getHeartRate { rate in
+            self.heartRate = rate
+        }
+        
+        // 新しいデータが取得された場合にUIを更新し、データが更新された場合はカウントを増やす
+        let query = HKObserverQuery(sampleType: HKObjectType.quantityType(forIdentifier: .heartRate)!,
+                                    predicate: nil) { (query, completionHandler, error) in
+            if error != nil {
+                print("Error observing heart rate data: \(error!.localizedDescription)")
+                return
+            }
+            self.getHeartRate { rate in
+                DispatchQueue.main.async {
+                    self.heartRate = rate
+                    self.counter += 1
+                }
+            }
+            completionHandler()
+        }
+        healthStore.execute(query)
+    }
+    
+    private func getHeartRate(completion: @escaping (Double?) -> Void) {
+        let heartRateType = HKQuantityType.quantityType(forIdentifier: .heartRate)!
+        
+        let query = HKSampleQuery(sampleType: heartRateType,
+                                  predicate: nil,
+                                  limit: 1,
+                                  sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: false)]) { (query, results, error) in
+            
+            guard error == nil, let sample = results?.first as? HKQuantitySample else {
+                print("Error fetching heart rate data: \(error?.localizedDescription ?? "Unknown error")")
+                completion(nil)
+                return
+            }
+            
+            let heartRateUnit = HKUnit.count().unitDivided(by: .minute())
+            let heartRate = sample.quantity.doubleValue(for: heartRateUnit)
+            
+            DispatchQueue.main.async {
+                completion(heartRate)
+            }
+        }
+        
+        healthStore.execute(query)
+    }
+}
+
+struct ContentView: View {
+    @ObservedObject private var heartRateMonitor = HeartRateMonitor()
+
+    var body: some View {
+        VStack {
+            if let heartRate = heartRateMonitor.heartRate {
+                Text("心拍数: \(Int(heartRate)) BPM")
+                    .font(.largeTitle)
+                    .padding()
+                if heartRate > 90 {
+                    Text("あああああああああ")
+                        .font(.largeTitle)
+                        .padding()
+                }
+            } else {
+                Text("心拍数を取得中...")
+                    .font(.largeTitle)
+                    .padding()
+            }
+            Text("カウンター: \(heartRateMonitor.counter)")
+                .font(.largeTitle)
+                .padding()
+            
+        }
+    }
+}
+
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+    }
+}
